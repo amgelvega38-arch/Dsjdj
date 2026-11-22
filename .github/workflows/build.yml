@@ -1,0 +1,99 @@
+
+name: EXTERNAL iOS - Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile iOS IPA
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar entorno
+        run: |
+          set -euo pipefail
+          echo "Preparando compilación iOS..."
+          xcodebuild -version
+          mkdir -p proyecto
+
+      - name: Extraer ZIP
+        run: |
+          set -euo pipefail
+          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" -print -quit)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No se encontró ningún ZIP"
+            exit 1
+          fi
+
+          unzip -o "$ZIP_FILE" -d proyecto
+
+      - name: Detectar proyecto Xcode
+        run: |
+          set -euo pipefail
+
+          PROJECT=$(find proyecto -name "ThreeOneOSFive.xcodeproj" -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: No existe ThreeOneOSFive.xcodeproj"
+            exit 1
+          fi
+
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Verificar Scheme
+        run: |
+          set -euo pipefail
+          xcodebuild -list -project "$PROJECT"
+
+      - name: Compilar aplicación
+        run: |
+          set -euo pipefail
+
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "3105" \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Crear IPA
+        run: |
+          set -euo pipefail
+
+          APP=$(find "$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos" \
+            -maxdepth 1 -name "*.app" -print -quit)
+
+          if [ -z "$APP" ]; then
+            echo "ERROR: No se encontró el archivo APP"
+            exit 1
+          fi
+
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+
+          zip -r -y EXTERNAL_iOS.ipa Payload
+
+          unzip -t EXTERNAL_iOS.ipa
+
+      - name: Subir IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: EXTERNAL-iOS-IPA
+          path: EXTERNAL_iOS.ipa
+          if-no-files-found: error
+          retention-days: 14
